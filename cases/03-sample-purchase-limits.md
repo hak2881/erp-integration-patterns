@@ -1,0 +1,55 @@
+# Sample Purchase Limits
+
+**Trigger** · Request, on the cart path · **Enforcement point** · Before checkout completes · **Platform support** · None
+
+## Context
+
+In ingredient supply, samples are how a sale starts. A formulator requests small quantities of several materials, tests them, and comes back months later with a production order. Samples are priced far below cost — they are marketing, not revenue.
+
+Which means they need a limit. Without one, the sample catalog becomes a cheap way to buy materials in bulk, one small order at a time.
+
+## Problem
+
+**The platform has no concept of a per-buyer purchase cap.** Inventory limits stock globally. Order limits cap a single order. Neither expresses "this company may take three sample units of this material, ever" or "…per quarter" — a rule about the buyer's history, not about this cart.
+
+**The limit is a business rule that keeps moving.** Which products count as samples, how many are allowed, whether the window resets, whether it is per material or per category — all of it changed during the build and will change again.
+
+**Enforcement has to happen before payment.** Rejecting after checkout means refunding a customer and explaining a rule they had no way to see. The cart is the last honest moment to say no.
+
+**A validation call sits in the purchase path.** Whatever this service does, it does it while the buyer is waiting, and if it is down the correct behavior is not obvious — blocking all checkout because a limits service is unhealthy trades a small revenue leak for a total outage.
+
+## Approach
+
+**A separate service, on its own port, with its own lifecycle.** This is the most volatile logic in the group — the rule changes far more often than order sync or inventory sync do. Isolating it means a limits change deploys without touching anything that moves money into the ERP.
+
+**The limit is evaluated against purchase history, not cart contents alone.** The question is "how many has this company already taken", which requires state the cart does not carry. The service owns that count rather than inferring it from what is in front of it.
+
+**Configuration over code for the rule's parameters.** Quantities, eligible products, and window length are settings. The shape of the rule is code; the numbers in it are not.
+
+**Fail-open was chosen deliberately, and it is a tradeoff not a default.** If the limits service cannot answer, checkout proceeds. The exposure is a bounded amount of under-priced product; the alternative is blocking every purchase — including full-price production orders — because a marketing guardrail is unavailable. That calculus would flip if samples were expensive or the cap were regulatory rather than commercial, and it is worth restating whenever either changes.
+
+## What this case is really about
+
+The interesting part is not the rule. It is recognizing that a piece of logic is *volatile* and giving it a boundary that matches its change rate — rather than filing it next to code that changes yearly and then redeploying an accounting integration every time marketing revises a sample allowance.
+
+---
+
+## 한국어 요약
+
+원료 공급업에서 **샘플은 거래의 시작점**입니다. 조향/제형 담당자가 여러 원료를 소량 받아 테스트하고, 몇 달 뒤 양산 주문으로 돌아옵니다. 샘플은 원가 이하로 책정되며 매출이 아니라 마케팅입니다. 그래서 제한이 필요합니다. 없으면 샘플 카탈로그가 **소량 주문을 반복해 원료를 싸게 사는 경로**가 됩니다.
+
+**어려웠던 지점**
+
+- **플랫폼에 "구매자별 상한"이라는 개념이 없습니다.** 재고는 전역으로 제한되고, 주문 제한은 단일 주문을 제한합니다. "이 회사는 이 원료 샘플을 총 3개까지" 또는 "분기당 3개까지"는 **장바구니가 아니라 구매자의 이력**에 대한 규칙이라 어느 쪽으로도 표현되지 않습니다.
+- **계속 바뀌는 비즈니스 규칙입니다.** 무엇을 샘플로 볼지, 몇 개까지 허용할지, 기간이 리셋되는지, 원료 단위인지 카테고리 단위인지 — 구축 중에도 다 바뀌었고 또 바뀔 겁니다.
+- **결제 전에 막아야 합니다.** 결제 후 거절은 환불하고, 고객이 볼 방법도 없었던 규칙을 설명하는 일이 됩니다. 장바구니가 정직하게 거절할 수 있는 마지막 순간입니다.
+- **검증 호출이 구매 경로에 놓입니다.** 구매자가 기다리는 동안 동작하고, 장애 시 올바른 동작이 자명하지 않습니다. 제한 서비스가 아프다고 전체 결제를 막으면 작은 매출 누수를 전면 장애와 맞바꾸는 셈입니다.
+
+**접근**
+
+- **별도 서비스, 별도 포트, 별도 수명주기.** 이 그룹에서 가장 변덕스러운 로직입니다. 주문 동기화·재고 동기화보다 훨씬 자주 바뀝니다. 격리해두면 제한 규칙 변경이 **ERP로 돈을 넣는 코드를 건드리지 않고** 배포됩니다.
+- **장바구니가 아니라 구매 이력에 대해 판정합니다.** 질문이 "이 회사가 지금까지 몇 개 받았나"이므로 장바구니가 들고 있지 않은 상태가 필요합니다. 서비스가 눈앞의 것에서 추론하지 않고 그 카운트를 직접 소유합니다.
+- **규칙의 파라미터는 코드가 아니라 설정.** 수량·대상 상품·기간은 설정값입니다. 규칙의 **형태**는 코드이고, 그 안의 **숫자**는 아닙니다.
+- **fail-open은 의도한 선택이며 기본값이 아닙니다.** 제한 서비스가 답을 못 하면 결제를 진행시킵니다. 노출되는 위험은 한정된 금액의 저가 상품이고, 반대 선택은 마케팅 가드레일 하나 때문에 **정가 양산 주문까지 포함한 모든 구매를 차단**하는 것입니다. 샘플이 비싸지거나 상한이 상업적 기준이 아니라 규제 기준이 되면 이 계산은 뒤집히고, 그때마다 다시 명시해야 합니다.
+
+**이 케이스의 요점** — 흥미로운 건 규칙 자체가 아니라, 어떤 로직이 **변덕스럽다**는 걸 알아보고 **변경 주기에 맞는 경계**를 주는 판단입니다. 1년에 한 번 바뀌는 코드 옆에 두면, 마케팅이 샘플 허용량을 손볼 때마다 회계 연동을 재배포하게 됩니다.
